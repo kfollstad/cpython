@@ -1328,6 +1328,7 @@ class PurePathTest(_BasePurePathTest, unittest.TestCase):
 
 # Make sure any symbolic links in the base test path are resolved.
 BASE = os.path.realpath(TESTFN)
+REL_BASE = TESTFN
 join = lambda *x: os.path.join(BASE, *x)
 rel_join = lambda *x: os.path.join(TESTFN, *x)
 
@@ -1721,11 +1722,80 @@ class _BasePathTest(object):
         q = p.resolve(strict)
         self.assertEqual(q, expected)
 
-    # This can be used to check both relative and absolute resolutions.
-    _check_resolve_relative = _check_resolve_absolute = _check_resolve
+    # These can be used to check both relative and absolute symlink
+    # resolutions.
+    _check_resolve_relative_link = _check_resolve
+    _check_resolve_absolute_link = _check_resolve
+
+    def _check_resolve_relative_path(self, p, expected, strict=True):
+        self.assertFalse(p.is_absolute(), msg=f'{p} is an absolute path')
+        self._check_resolve(p, expected, strict)
+
+    def _check_resolve_absolute_path(self, p, expected, strict=True):
+        self.assertTrue(p.is_absolute(), msg=f'{p} is a relative path')
+        self._check_resolve(p, expected, strict)
+
+    def test_resolve_relative_path(self):
+        def _path_depth(purepath):
+            length = len(purepath.anchor)
+            return length if purepath.anchor == "" else length - 1
+        P = self.cls
+        drive = P(BASE).drive
+        root = P(BASE).root
+        p = P(REL_BASE)
+        self._check_resolve_relative_path(p, P(BASE))
+        p = P(REL_BASE, 'fileA')
+        self._check_resolve_relative_path(p, P(BASE, 'fileA'))
+        p = P(drive, REL_BASE, 'fileA')  # W/O a root, still relative
+        self._check_resolve_relative_path(p, P(BASE, 'fileA'))
+        p = P(REL_BASE, 'dirB', 'fileB')
+        self._check_resolve_relative_path(p, P(BASE, 'dirB', 'fileB'))
+        p = P(REL_BASE, 'absent')
+        self._check_resolve_relative_path(p, P(BASE, 'absent'), strict=False)
+        self.assertRaises(FileNotFoundError, p.resolve, strict=True)
+        p = P(REL_BASE, 'dirA', 'really', 'absent.ext')
+        self._check_resolve_relative_path(
+            p, P(BASE, 'dirA', 'really', 'absent.ext'), strict=False
+        )
+        self.assertRaises(FileNotFoundError, p.resolve, strict=True)
+        p = P(REL_BASE, 'dirC', 'dirD', '..', '..', 'dirC', '..', 'dirA')
+        self._check_resolve_relative_path(p, P(BASE, 'dirA'))
+        p = P(REL_BASE, '.', '.', 'dirA', '..', '.', '.', 'dirA')
+        self._check_resolve_relative_path(p, P(BASE, 'dirA'))
+        # Path lengths on Windows must be < 260 chars, and '/..'
+        # is len 3, so we use this as an upper bound for dot paths
+        # otherwise this will throw a FileNotFound on Windows.
+        # There is wiggle room to prevent this from breaking
+        # since BASE is contained in the cur directory and
+        # therefore len(cur_path) < len(BASE).
+        max_levels_up = (260 - len(BASE)) // 3
+        levels_to_ascend = max(max_levels_up, _path_depth(P(BASE)))
+        p = P('/'.join(('..',) * levels_to_ascend))
+        self._check_resolve_relative_path(p, P(drive, root))
+
+    def test_resolve_absolute_path(self):
+        P = self.cls
+        p = P(BASE)
+        self._check_resolve_absolute_path(p, p)
+        p = P(BASE, 'fileA')
+        self._check_resolve_absolute_path(p, P(BASE, 'fileA'))
+        p = P(BASE, 'dirB', 'fileB')
+        self._check_resolve_absolute_path(p, P(BASE, 'dirB', 'fileB'))
+        p = P(BASE, 'absent')
+        self._check_resolve_absolute_path(p, P(BASE, 'absent'), strict=False)
+        self.assertRaises(FileNotFoundError, p.resolve, strict=True)
+        p = P(BASE, 'dirA', 'really', 'absent.ext')
+        self._check_resolve_absolute_path(
+            p, P(BASE, 'dirA', 'really', 'absent.ext'), strict=False
+        )
+        self.assertRaises(FileNotFoundError, p.resolve, strict=True)
+        p = P(BASE, 'dirC', 'dirD', '..', '..', 'dirC', '..', 'dirA')
+        self._check_resolve_absolute_path(p, P(BASE, 'dirA'))
+        p = P(BASE, '.', '.', 'dirA', '..', '.', '.', 'dirA')
+        self._check_resolve_absolute_path(p, P(BASE, 'dirA'))
 
     @os_helper.skip_unless_symlink
-    def test_resolve_common(self):
+    def test_resolve_symlinks(self):
         P = self.cls
         p = P(BASE, 'foo')
         with self.assertRaises(OSError) as cm:
@@ -1742,27 +1812,30 @@ class _BasePathTest(object):
                                  os.path.abspath(os.path.join('foo', 'in', 'spam')))
         # These are all relative symlinks.
         p = P(BASE, 'dirB', 'fileB')
-        self._check_resolve_relative(p, p)
+        self._check_resolve(p, p)
         p = P(BASE, 'linkA')
-        self._check_resolve_relative(p, P(BASE, 'fileA'))
+        self._check_resolve_relative_link(p, P(BASE, 'fileA'))
         p = P(BASE, 'dirA', 'linkC', 'fileB')
-        self._check_resolve_relative(p, P(BASE, 'dirB', 'fileB'))
+        self._check_resolve_relative_link(p, P(BASE, 'dirB', 'fileB'))
         p = P(BASE, 'dirB', 'linkD', 'fileB')
-        self._check_resolve_relative(p, P(BASE, 'dirB', 'fileB'))
+        self._check_resolve_relative_link(p, P(BASE, 'dirB', 'fileB'))
         # Non-strict
         p = P(BASE, 'dirA', 'linkC', 'fileB', 'foo', 'in', 'spam')
-        self._check_resolve_relative(p, P(BASE, 'dirB', 'fileB', 'foo', 'in',
-                                          'spam'), False)
+        self._check_resolve_relative_link(
+                p, P(BASE, 'dirB', 'fileB', 'foo', 'in', 'spam'), False
+        )
         p = P(BASE, 'dirA', 'linkC', '..', 'foo', 'in', 'spam')
         if os.name == 'nt':
             # In Windows, if linkY points to dirB, 'dirA\linkY\..'
             # resolves to 'dirA' without resolving linkY first.
-            self._check_resolve_relative(p, P(BASE, 'dirA', 'foo', 'in',
+            self._check_resolve_relative_link(p, P(BASE, 'dirA', 'foo', 'in',
                                               'spam'), False)
         else:
             # In Posix, if linkY points to dirB, 'dirA/linkY/..'
             # resolves to 'dirB/..' first before resolving to parent of dirB.
-            self._check_resolve_relative(p, P(BASE, 'foo', 'in', 'spam'), False)
+            self._check_resolve_relative_link(
+                p, P(BASE, 'foo', 'in', 'spam'), False
+            )
         # Now create absolute symlinks.
         d = os_helper._longpath(tempfile.mkdtemp(suffix='-dirD',
                                                  dir=os.getcwd()))
@@ -1770,20 +1843,25 @@ class _BasePathTest(object):
         os.symlink(os.path.join(d), join('dirA', 'linkX'))
         os.symlink(join('dirB'), os.path.join(d, 'linkY'))
         p = P(BASE, 'dirA', 'linkX', 'linkY', 'fileB')
-        self._check_resolve_absolute(p, P(BASE, 'dirB', 'fileB'))
+        self._check_resolve_absolute_link(p, P(BASE, 'dirB', 'fileB'))
         # Non-strict
         p = P(BASE, 'dirA', 'linkX', 'linkY', 'foo', 'in', 'spam')
-        self._check_resolve_relative(p, P(BASE, 'dirB', 'foo', 'in', 'spam'),
-                                     False)
+        self._check_resolve_relative_link(
+            p, P(BASE, 'dirB', 'foo', 'in', 'spam'), False
+        )
         p = P(BASE, 'dirA', 'linkX', 'linkY', '..', 'foo', 'in', 'spam')
         if os.name == 'nt':
             # In Windows, if linkY points to dirB, 'dirA\linkY\..'
             # resolves to 'dirA' without resolving linkY first.
-            self._check_resolve_relative(p, P(d, 'foo', 'in', 'spam'), False)
+            self._check_resolve_relative_link(
+                p, P(d, 'foo', 'in', 'spam'), False
+            )
         else:
             # In Posix, if linkY points to dirB, 'dirA/linkY/..'
             # resolves to 'dirB/..' first before resolving to parent of dirB.
-            self._check_resolve_relative(p, P(BASE, 'foo', 'in', 'spam'), False)
+            self._check_resolve_relative_link(
+                p, P(BASE, 'foo', 'in', 'spam'), False
+            )
 
     @os_helper.skip_unless_symlink
     def test_resolve_dot(self):
