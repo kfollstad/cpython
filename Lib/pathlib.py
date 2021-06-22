@@ -8,6 +8,7 @@ import re
 import sys
 import warnings
 from _collections_abc import Sequence
+from abc import ABCMeta
 from errno import EINVAL, ENOENT, ENOTDIR, EBADF, ELOOP
 from operator import attrgetter
 from stat import S_ISDIR, S_ISLNK, S_ISREG, S_ISSOCK, S_ISBLK, S_ISCHR, S_ISFIFO
@@ -16,6 +17,7 @@ from urllib.parse import quote_from_bytes as urlquote_from_bytes
 
 __all__ = [
     "PurePath", "PurePosixPath", "PureWindowsPath",
+    "AbstractPath",
     "Path", "PosixPath", "WindowsPath",
     ]
 
@@ -260,8 +262,13 @@ class _PosixFlavour(_Flavour):
         return 'file://' + urlquote_from_bytes(bpath)
 
 
+class _GenericFlavour(_PosixFlavour):
+    pass
+
+
 _windows_flavour = _WindowsFlavour()
 _posix_flavour = _PosixFlavour()
+_generic_flavour = _GenericFlavour()
 
 
 class _Accessor:
@@ -943,10 +950,15 @@ class PureWindowsPath(PurePath):
     __slots__ = ()
 
 
+class AbstractPath(PurePath, metaclass=ABCMeta):
+    _flavour = _generic_flavour
+    __slots__ = ()
+
+
 # Filesystem-accessing classes
 
 
-class Path(PurePath):
+class Path(AbstractPath):
     """PurePath subclass that can make system calls.
 
     Path represents a filesystem path but unlike PurePath, also offers

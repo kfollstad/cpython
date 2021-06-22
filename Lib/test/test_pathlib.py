@@ -1438,6 +1438,20 @@ class WindowsPathAsPureTest(PureWindowsPathTest):
             P('c:/').group()
 
 
+class AbstractPathTest(unittest.TestCase):
+    cls = pathlib.AbstractPath
+
+    def test_abstract_path(self):
+        P = self.cls
+        p = P()
+        self.assertEqual(p._flavour, pathlib._generic_flavour)
+
+        class Derived(P):
+            pass
+        d = Derived()
+        self.assertEqual(d._flavour, pathlib._generic_flavour)
+
+
 class _BasePathTest(object):
     """Tests for the FS-accessing functionalities of the Path classes."""
 
